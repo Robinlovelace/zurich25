@@ -2,7 +2,12 @@
 title: "Modelling active travel with efficient, future-proof tools"
 author: "Robin Lovelace"
 date: "2025-10-18"
-format: gfm
+format: html
+execute: 
+  cache: true
+  echo: false
+  message: false
+  warning: false
 ---
 
 
@@ -20,19 +25,206 @@ To use the approach of setting out the dependencies of a directed acyclic graph 
 
 
 ```{mermaid}
+%%| label: fig-4stage
+%%| fig-cap: The 4-stage transport modelling framework presented as a linear Directed Acyclic Graph (DAG)
 graph TD
     A[Trip Generation] --> B[Trip Distribution]
     B --> C[Mode Choice]
     C --> D[Route Assignment]
 ```
 
-In fact, the following dependency structure is more realistic:
+In fact, the following dependency structure may be more realistic, with trip generation, distribution and mode choice all affected by the network, the key input into route assignment.
 
 ```{mermaid}
+%%| label: fig-6stage
+%%| fig-cap: A 6-stage transport modelling framework with recursive dependencies between Trip Distribution and Route Assignment stages.
 graph TD
-    A[Trip Generation] --> B[Trip Distribution]
-    A --> C[Mode Choice]
-    B --> C[Mode Choice]
-    C --> D[Route Assignment]
+    E[Network] --> D[Route Assignment: s4]
+    F[Other Factors] --> C
+    F --> B
+    C --> D
+    D --> B
+    E --> B[Trip Distribution: s2]
+    E --> C[Mode Choice: s3]
+    B --> C
+    B --> A[Trip Generation: s1]
 ```
 
+This partial reversal of the order of transport modelling elements highlights the fact that the 'demand' for and actual usage of transport systems measured as the number of departures and arrivals at any given geographic entity (Trip Generation) is not a rigid input.
+The number of trips taking place is *a consequence of* the transport systems and other factors that (dis)incentivise trips between origins and destinations from taking place (Trip Distribution).
+
+These observations raise the question: why did the 4-stage model come to dominate thinking in transport modelling?
+It is of course impossible to know: the decisions that led to its primacy were made many decades ago, and intentions cannot always be inferred.
+However, there are various considerations that make it understandable why the 4-stage model presented in @fig-4stage has become the starting point for transport modelling instead of other more complicated approaches such as the 6-stage model presented in @fig-6stage.
+My perhaps-untestable hypothesis is that the following reasons explain it, in descending order of how easy they are to justify:
+
+1. Simplicity: 
+2. Lack of data: 
+3. Lack of methods:
+4. Epistemic bias: Belief in the inevitability of 'demand' leading to trips being generated due to the primacy of traditional microeconomics underlying much transport planning and related fields public decision-making.
+
+It would be easy to criticize early transport modellers as naive.
+However, anyone considering ad-hominem attacks now should remember that they have the benefits of hindsight, plentiful datasets, an abundance of available methods, and near-infinite computational resources compared with early transport planning researchers and practitioners.
+Of course it is now possible to consider more complex and realistic models, but that is not the point.
+The question now should be how can we reform, rebuild or *retrofit* transport modelling for the needs of the 21st Century without losing much of what is good in the established practice of transport modelling.
+In other words, we should not through the metaphorical baby out with the bathwater.
+
+The first of the reasons hypothesised above (simplicity) alone can, I content, fully justify early practitioners' development of the 4-stage, without worrying about the other 3 reasons.
+This is because, as applied mathematics text books tell us, good models start simple and then incrementally add complexity as they go.
+The biggest issue with 4-stage model is not that it exists, but that it became entrenched.
+
+Returning to our topic of modelling active travel with efficient, future-proof tools, these observations in fact *justify* the focus on the 4-stage model as a starting point that can be then critiqued, iterated-on, and then replaced with something more appropriate to contemporary contexts (with health a more prominent priority than coping with growth in car use, for example).
+
+So let's go ahead and build a transport model from first principles, simplifying the 4-stage model further by collapsing Trip Generation and Distribution into a single stage that can be described as Trip Estimation (at the origin-destination level).
+
+
+```{r}
+#| include: false
+library(tidyverse)
+library(sf)
+# The following parameter sets the diameter of the study area
+# diameter of 1, 3, 6, 10 and 15 km associated with n_circles of 1, 2, 3, 4 and 5
+n_circles = 3 # sets diameter to 6 km
+if (!file.exists("zones.geojson")) {
+  zones = zonebuilder::zb_zone("leeds", n_circles = n_circles)
+  sf::write_sf(zones, "zones.geojson", delete_dsn = TRUE)
+}
+zones = sf::read_sf("zones.geojson")
+study_area = zones |>
+  sf::st_union()
+# Uncomment the next line to check which area will be downloaded:
+# osmextract::oe_find(study_area)
+# The following commands can download more data than intended:
+# network = osmextract::oe_get(study_area, boundary = study_area, boundary_type = "clipsrc")
+network = osmextract::oe_get_network(study_area, boundary = study_area, boundary_type = "clipsrc", mode = "driving")
+```
+
+```{r}
+#| fig-cap: Road network data in the case study area (diameter 6 km around Leeds city centre)
+#| label: fig-road-network
+network |>
+  sf::st_geometry() |>
+  plot()
+```
+
+The number of trips can be estimated using spatial interaction models using data on the number of people living in each area (and their propensity to travel which depends on socio-economic and other variables) and the 'attractiveness' of each potential destination.
+For the sake of simplicity and international generalisability, we will initially estimate the population as the number of residential buildings in each area multiplied by 10 and the attractiveness of each destination as the total number of OSM nodes in each.
+We can of course use more refined measures such as population estimates from WorldPop but this approach, which only requires a single input data source (OSM) for route network and area-level variales, is used for illustrative purposes and to increase reproducibility in new contexts.
+
+```{r}
+#| eval: false
+# Note: this chunk is kept to demonstrate that most houses are not points
+osm_points = osmextract::oe_get(study_area, layer = "points", boundary = study_area, boundary_type = "clipsrc", extra_tags = "building")
+osm_points |>
+  sf::st_drop_geometry() |>
+  count(building) |>
+  arrange(desc(n))
+# names(osm_points)
+osm_points_resi = osm_points |>
+  filter(str_detect(other_tags, "residential|house"))
+osm_points_resi |>
+  sf::st_geometry() |>
+  plot()
+```
+
+```{r}
+#| include: false
+osm_polygons = osmextract::oe_get(study_area, layer = "multipolygons", boundary = study_area, boundary_type = "clipsrc", extra_tags = "building")
+osm_polygons |>
+  sf::st_drop_geometry() |>
+  count(building) |>
+  arrange(desc(n))
+# names(osm_polygons)
+osm_polygons_resi = osm_polygons |>
+  filter(str_detect(building, "resi|house|terrace|appart|dorm")) |>
+  sf::st_centroid()
+# nrow(osm_polygons_resi)
+# mapview::mapview(osm_polygons_resi |> sample_n(1000))
+# osm_polygons_resi |>
+#   sf::st_geometry() |>
+#   plot() 
+osm_polygons_zones = sf::st_join(
+  osm_polygons_resi |> select(building),
+  zones |> select(label)
+) |>
+  sf::st_drop_geometry() |>
+  count(label, name = "population")
+```
+
+```{r}
+osm_polygons_employment = osm_polygons |>
+  filter(str_detect(building, "retail|comm|school|uni|off|hosp|serv|parking|super")) |>
+  sf::st_centroid()
+osm_emp_zones = sf::st_join(
+  osm_polygons_employment |> select(building),
+  zones |> select(label)
+) |>
+  sf::st_drop_geometry() |>
+  count(label, name = "jobs")
+```
+
+```{r}
+#| label: fig-sim-inputs
+#| fig-cap: "Inputs to a spatial interaction model"
+zones = left_join(zones, osm_polygons_zones)
+zones = left_join(zones, osm_emp_zones)
+zones |> 
+  select(population, jobs) |>
+  plot()
+```
+
+```{r}
+installed_packages = installed.packages()
+sf_routing_installed = "sfrouting" %in% installed_packages
+if (!sf_routing_installed) {
+  pak::pak("robinlovelace/sfrouting")
+  pak::pak("robinlovelace/simodels")
+}
+```
+
+Let's use the datasets presented in @fig-sim-inputs to run a spatial interaction model (SIM).
+
+```{r}
+library(simodels)
+od_sim_all = si_to_od(origins = zones, destinations = zones)
+# We'll remove intrazonal flows for now:
+od_sim = od_sim_all |>
+  filter(O != D)
+names(od_sim)
+```
+
+Note that the output has duplicate columns: `si_to_od()` joins data from the origin and destination objects into the resulting OD object.
+
+A simplistic SIM - in this case an inverse power distance decay function (negative exponential is another commonly used decay function) - can be created just based on the distance between points:
+
+```{r unconstrained1}
+# si_power = function(d, beta) (d / 1000)^beta
+si_exponential = function(d, beta) exp(beta * (d / 1000))
+# With flow proportional to origin population multiplied by destination jobs)
+si_exp_constrained = function(d, beta, pop, jobs) {
+  pop * jobs * exp(beta * (d / 1000))
+}
+od_calculated = si_calculate(
+  od_sim,
+  fun = si_exp_constrained,
+  d = distance_euclidean,
+  pop = origin_population,
+  jobs = destination_jobs,
+  beta = -0.5
+  ,
+  constraint_production = origin_population
+  )
+od_calculated |>
+  select(interaction) |>
+  plot(logz = TRUE)
+# Plot top 100 interactions
+od_calculated |>
+  arrange(desc(interaction)) |>
+  slice(1:50) |>
+  select(interaction) |>
+  plot(logz = TRUE)
+# ggplot(zones) +
+#   geom_point(aes(population, jobs))
+ggplot(od_calculated) +
+  geom_point(aes(distance_euclidean, interaction))
+```
