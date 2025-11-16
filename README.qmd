@@ -1,0 +1,38 @@
+---
+title: "Modelling active travel with efficient, future-proof tools"
+author: "Robin Lovelace"
+date: "2025-10-18"
+format: gfm
+---
+
+
+
+A transport models from first principles can be expressed in 4 stages, according the classic four-step model:
+
+1. Trip generation: estimating the number of trips originating in and destined for each zone in the study area.
+2. Trip distribution: determining where trips will go, often using a gravity model or similar approach.
+3. Mode choice: deciding which mode of transport (e.g., car, bike, public transit) will be used for each trip.
+4. Route assignment: assigning trips to specific routes on
+
+We can question the suitability of this approach, in which each stage is treated separately and sequentially. 
+It is clear that the number of trips departing from a zone is not independent of where those trips are going, the mode chosen, or the route taken: in terms of the dependencies between these stages, one could argue that the order of the stages should be reversed.
+To use the approach of setting out the dependencies of a directed acyclic graph (DAG), the 4 stage model assumes the following structure:
+
+
+```{mermaid}
+graph TD
+    A[Trip Generation] --> B[Trip Distribution]
+    B --> C[Mode Choice]
+    C --> D[Route Assignment]
+```
+
+In fact, the following dependency structure is more realistic:
+
+```{mermaid}
+graph TD
+    A[Trip Generation] --> B[Trip Distribution]
+    A --> C[Mode Choice]
+    B --> C[Mode Choice]
+    C --> D[Route Assignment]
+```
+
