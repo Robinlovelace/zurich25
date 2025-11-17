@@ -190,6 +190,7 @@ sf_routing_installed = "sfrouting" %in% installed_packages
 if (!sf_routing_installed) {
   pak::pak("robinlovelace/sfrouting")
   pak::pak("robinlovelace/simodels")
+  pak::pak("ITSleeds/pct")
 }
 ```
 
@@ -239,6 +240,84 @@ od_calculated |>
 ggplot(od_calculated) +
   geom_point(aes(distance_euclidean, interaction))
 # sum(od_calculated$interaction) == sum(zones$population, na.rm = TRUE)
+```
+
+```{r}
+# Get routes for a sample of the OD data:
+od_sample = od_calculated |> 
+  slice_max(interaction, n = 100)
+if (!file.exists("routes.gpkg")) {
+  routes = stplanr::route(
+    l = od_sample,
+    route_fun = cyclestreets::journey,
+    plan = "quietest"
+  )
+  sf::write_sf(routes, "routes_quiet.gpkg", delete_dsn = TRUE)
+  system("gh release upload v1 routes_quiet.gpkg --clobber")
+} else {
+  routes = sf::read_sf("routes_quiet.gpkg")
+}
+```
+
+```{r}
+routes_with_stats = routes |> 
+  group_by(O, D) |> 
+  mutate(
+    length_route = sum(distances),
+    route_hilliness = mean(gradient_segment)
+    ) |> 
+  ungroup()
+```
+
+```{r}
+routes_go_dutch = routes_with_stats |> 
+  mutate(
+    pcycle_go_dutch = pct::uptake_pct_godutch_2020(
+      distance = length_route,
+      gradient = route_hilliness
+    ),
+    pcycle_govtarget = pct::uptake_pct_govtarget_2020(
+      distance = length_route,
+      gradient = route_hilliness
+    )
+  ) |> 
+  mutate(
+    bicycle_go_dutch = interaction * pcycle_go_dutch,
+    bicycle_govtarget = interaction * pcycle_govtarget
+  )
+# names(routes_go_dutch)
+
+```
+
+```{r}
+#| label: fig-rnet-go-dutch
+#| fig-cap: "Route network summarising Go Dutch scenario"
+rnet_go_dutch = stplanr::overline(
+  routes_go_dutch,
+  attrib = c("interaction", "bicycle_govtarget", "bicycle_go_dutch", "quietness", "gradient_smooth"),
+  fun = list(sum = sum, mean = mean)
+) |>
+  transmute(
+    govtarget = bicycle_govtarget_sum,
+    go_dutch = bicycle_go_dutch_sum,
+    total = interaction_sum,
+    quietness = quietness_mean,
+    gradient = gradient_smooth_mean
+  )
+# plot(rnet_go_dutch)
+library(tmap)
+tm_shape(rnet_go_dutch) +
+  tm_lines(lwd = c("govtarget", "go_dutch"), lwd.free = FALSE, scale = 9, col = "quietness", palette = "-Reds")
+```
+
+```{r}
+#| eval: false
+#| fig-cap: "Go Dutch scenario"
+rnet_go_dutch |> 
+  ggplot() +
+  geom_sf(aes(lwd = bicycle_go_dutch_sum)) +
+  scale_linewidth_continuous(range = c(0.1, 3)) +
+  labs(title = "Go Dutch scenario")
 ```
 
 We can use 'All or Nothing' assignment to route the trips estimated by the SIM through the network.
@@ -396,18 +475,4 @@ ggplot() +
   geom_sf(data = nodes_1_2, color = "red", size = 1) +
   geom_sf(data = single_route, color = "blue", size = 2) +
   labs(title = "Route for the first OD pair")
-```
-
-
-```{r}
-# routes_quiet = cyclestreets::batch(od_calculated, strategies = "quietest")
-route_files_exist = file.exists("routes_quiet.gpkg")
-if (!route_files_exist) {
-  routes_quiet = stplanr::route(l = od_calculated, route_fun = cyclestreets::journey, plan = "quietest")
-  sf::write_sf(routes_quiet, "routes_quiet.gpkg", delete_dsn = TRUE)
-  system("gh release create v1")
-  system("gh release upload v1 routes_quiet.gpkg --clobber")
-}
-rnet_quiet = stplanr::overline(routes_quiet, attrib = "interaction")
-plot(rnet_quiet)
 ```

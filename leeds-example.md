@@ -157,6 +157,14 @@ created just based on the distance between points:
 
 ![](leeds-example_files/figure-commonmark/unconstrained1-3.png)
 
+<div id="fig-rnet-go-dutch">
+
+![](leeds-example_files/figure-commonmark/fig-rnet-go-dutch-1.png)
+
+Figure 3: Route network summarising Go Dutch scenario
+
+</div>
+
 We can use ‘All or Nothing’ assignment to route the trips estimated by
 the SIM through the network.
 
