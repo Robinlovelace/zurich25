@@ -476,3 +476,74 @@ ggplot() +
   geom_sf(data = single_route, color = "blue", size = 2) +
   labs(title = "Route for the first OD pair")
 ```
+
+
+The following code uses dodgr for getting an undirected routable network from OSM, and then uses cppRouting for finding the shortest path between two  random points.
+
+
+```{r}
+library(tmap)
+library(cppRouting)
+library(dodgr)
+
+
+dodgr_sc <- dodgr_streetnet_sc(st_bbox(study_area))
+
+# 1. Create dodgr graph
+# Note: weight_streetnet can be time consuming
+net_dodgr_full = weight_streetnet(dodgr_sc, wt_profile = "motorcar")
+table(net_dodgr_full$component)
+net_dodgr_comp = dodgr_components(net_dodgr_full)
+table(net_dodgr_comp$component)
+# Clean graph to only include largest connected component
+net_dodgr = net_dodgr_comp[net_dodgr_comp$component == 1, ]
+table(net_dodgr$component)
+
+net_dodgr_sf = dodgr_to_sf(net_dodgr)
+
+vert_dodgr_sf <- dodgr_vertices(net_dodgr) |> st_as_sf(coords = c("x", "y"), crs = st_crs(4326))
+
+
+set.seed(123)
+rand_origin = sample(net_dodgr_sf$from_id, 1)
+rand_destination = sample(net_dodgr_sf$to_id, 1)
+
+od_rand = vert_dodgr_sf |> 
+  filter(id %in% c(rand_origin, rand_destination))
+
+
+df_for_cpp <- net_dodgr_sf |> 
+  st_drop_geometry() |> 
+  select(from = from_id,
+     to = to_id,
+    dist = d_weighted)
+
+graph_cpp = makegraph(
+  df_for_cpp,
+directed = FALSE # sf output from dodgr is not directed...
+)
+
+
+rand_route = get_path_pair(
+  Graph = graph_cpp,
+  from = rand_origin,
+  to = rand_destination
+)
+
+rand_route_edges <- tibble(from_id = c(rand_route[[1]],NA),
+to_id = c(NA,rand_route[[1]])) |> drop_na() 
+
+rand_route_sf <- bind_rows(
+  net_dodgr_sf |> 
+  semi_join(rand_route_edges, by = c("from_id", "to_id")),
+net_dodgr_sf |> 
+  semi_join(rand_route_edges, by = c("from_id"="to_id", "to_id"="from_id"))) # this is done as the network is undirected
+
+tm_shape(net_dodgr_sf)+
+  tm_lines("grey",lwd = 0.8)+
+  tm_shape(od_rand)+
+  tm_dots(col = "red", size = 0.2)
+  tm_shape(rand_route_sf)+
+  tm_lines("steelblue", lwd = 2)
+
+```
