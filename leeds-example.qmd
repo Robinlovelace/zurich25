@@ -1,3 +1,4 @@
+---
 title: "Modelling active travel with efficient, future-proof tools"
 author: "Robin Lovelace"
 date: "2025-10-18"
@@ -369,6 +370,7 @@ graph_with_flows_sf |>
 ```{r}
 #| label: fig-single-route
 #| fig-cap: "A single route for the first OD pair"
+#| eval: false
 library(sfrouting)
 
 # Get the first OD pair
