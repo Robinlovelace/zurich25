@@ -160,12 +160,4 @@ created just based on the distance between points:
 We can use ‘All or Nothing’ assignment to route the trips estimated by
 the SIM through the network.
 
-<div id="fig-aon">
-
-![](leeds-example_files/figure-commonmark/fig-aon-1.png)
-
-Figure 3: Estimated flows from All-or-Nothing assignment
-
-</div>
-
 We can do the same thing with the `dodgr` package.
