@@ -2,7 +2,7 @@
 title: "Modelling active travel with efficient, future-proof tools"
 author: "Robin Lovelace"
 date: "2025-10-18"
-format: html
+format: gfm
 execute: 
   cache: true
   echo: false
@@ -227,4 +227,132 @@ od_calculated |>
 #   geom_point(aes(population, jobs))
 ggplot(od_calculated) +
   geom_point(aes(distance_euclidean, interaction))
+# sum(od_calculated$interaction) == sum(zones$population, na.rm = TRUE)
 ```
+
+We can use 'All or Nothing' assignment to route the trips estimated by the SIM through the network.
+
+```{r}
+#| label: fig-aon
+#| fig-cap: "Estimated flows from All-or-Nothing assignment"
+# Create cppRouting graph
+library(cppRouting)
+library(sfnetworks)
+net_sfn = as_sfnetwork(network |> sf::st_cast("LINESTRING"), directed = FALSE) |> 
+  activate("nodes") |> 
+  mutate(ID = row_number())
+edges_for_cpp = net_sfn |> 
+  activate("edges") |> 
+  st_as_sf() |> 
+  mutate(weight = units::drop_units(st_length(geometry))) |> 
+  st_drop_geometry() |> 
+  select(from, to, weight)
+nodes_df = net_sfn |> 
+  activate("nodes") |> 
+  st_as_sf()
+nodes_for_cpp = data.frame(
+    ID = nodes_df$ID,
+    X = st_coordinates(nodes_df)[, 1],
+    Y = st_coordinates(nodes_df)[, 2]
+  )
+graph_cpp = cppRouting::makegraph(
+  df = edges_for_cpp,
+  directed = FALSE,
+  coords = nodes_for_cpp
+)
+
+# Map OD data to network nodes
+zone_centroids = st_centroid(zones)
+net_nodes_sf = net_sfn |> activate("nodes") |> st_as_sf()
+nearest_node_indices = st_nearest_feature(zone_centroids, net_nodes_sf)
+zone_centroids$node_id = net_nodes_sf$ID[nearest_node_indices]
+
+od_calculated_nodes = od_calculated |>
+  left_join(zone_centroids |> st_drop_geometry() |> select(label, node_id), by = c("O" = "label")) |>
+  rename(from_node_id = node_id) |>
+  left_join(zone_centroids |> st_drop_geometry() |> select(label, node_id), by = c("D" = "label")) |>
+  rename(to_node_id = node_id)
+
+# Perform All-or-Nothing assignment
+aon_flows = cppRouting::get_aon(
+  Graph = graph_cpp,
+  from = od_calculated_nodes$from_node_id,
+  to = od_calculated_nodes$to_node_id,
+  demand = od_calculated_nodes$interaction
+)
+
+# Join the flows back to the network for visualization
+sfn_edges = net_sfn |> 
+  activate("edges") |> 
+  st_as_sf()
+  
+aon_flows_join = aon_flows |>
+  mutate(from = as.integer(from), to = as.integer(to))
+
+sfn_edges_with_flow = sfn_edges |>
+  left_join(aon_flows_join, by = c("from", "to")) |>
+  mutate(flow = ifelse(is.na(flow), 0, flow))
+
+# Plot the results
+sfn_edges_with_flow |> 
+  filter(flow > 0) |>
+  ggplot() +
+  geom_sf(aes(color = flow, lwd = flow)) +
+  scale_color_viridis_c(trans = "log10") +
+  scale_linewidth_continuous(range = c(0.1, 3)) +
+  labs(title = "Estimated flows from All-or-Nothing assignment")
+```
+
+We can do the same thing with the `dodgr` package.
+
+```{r}
+#| label: fig-dodgr-aon
+#| fig-cap: "Estimated flows from All-or-Nothing assignment with dodgr"
+#| eval: false
+# Note: currently fails: https://github.com/UrbanAnalyst/dodgr/issues/325
+# The dodgr equivalent of the above is as follows:
+if (!"dodgr" %in% installed.packages()) {
+  install.packages("dodgr")
+}
+library(dodgr)
+# 1. Create dodgr graph
+# Note: weight_streetnet can be time consuming
+net_dodgr_full = weight_streetnet(network |> sf::st_cast("LINESTRING"), wt_profile = "motorcar")
+table(net_dodgr_full$component)
+net_dodgr_comp = dodgr_components(net_dodgr_full)
+table(net_dodgr_comp$component)
+# Clean graph to only include largest connected component
+net_dodgr = net_dodgr_comp[net_dodgr_comp$component == 1, ]
+table(net_dodgr$component)
+# 2. Map OD data to network nodes
+verts = dodgr_vertices(net_dodgr)
+zone_centroids_dodgr = st_centroid(zones)
+# Find nearest vertices
+from_pts = dodgr::match_pts_to_graph(net_dodgr, zone_centroids_dodgr, connected = TRUE)
+# 3. Prepare OD data
+zone_to_vertex_map = data.frame(
+  label = zone_centroids_dodgr$label,
+  vertex_id = from_pts
+)
+od_for_dodgr = od_calculated |>
+  left_join(zone_to_vertex_map, by = c("O" = "label")) |>
+  rename(from_id = vertex_id) |>
+  left_join(zone_to_vertex_map, by = c("D" = "label")) |>
+  rename(to_id = vertex_id) |>
+  select(from_id, to_id, interaction) |>
+  rename(from = from_id, to = to_id, flow = interaction) |> 
+  filter(!is.na(from), !is.na(to))
+# 4. Perform All-or-Nothing assignment
+# With just 1 OD pair:
+graph_with_flows = dodgr_flows_aggregate(net_dodgr, from = od_for_dodgr$from, to = od_for_dodgr$to, flows = od_for_dodgr$flow)
+# 5. Plot the results
+graph_with_flows_sf = dodgr_to_sf(graph_with_flows)
+graph_with_flows_sf |>
+  filter(flow > 0) |>
+  ggplot() +
+  geom_sf(aes(color = flow, lwd = flow)) +
+  scale_color_viridis_c(trans = "log10") +
+  scale_linewidth_continuous(range = c(0.1, 3)) +
+  labs(title = "Estimated flows from All-or-Nothing assignment (dodgr)")
+```
+
