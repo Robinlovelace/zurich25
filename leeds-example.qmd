@@ -398,3 +398,16 @@ ggplot() +
   labs(title = "Route for the first OD pair")
 ```
 
+
+```{r}
+# routes_quiet = cyclestreets::batch(od_calculated, strategies = "quietest")
+route_files_exist = file.exists("routes_quiet.gpkg")
+if (!route_files_exist) {
+  routes_quiet = stplanr::route(l = od_calculated, route_fun = cyclestreets::journey, plan = "quietest")
+  sf::write_sf(routes_quiet, "routes_quiet.gpkg", delete_dsn = TRUE)
+  system("gh release create v1")
+  system("gh release upload v1 routes_quiet.gpkg --clobber")
+}
+rnet_quiet = stplanr::overline(routes_quiet, attrib = "interaction")
+plot(rnet_quiet)
+```
