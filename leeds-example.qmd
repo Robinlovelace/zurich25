@@ -95,7 +95,18 @@ study_area = zones |>
 # osmextract::oe_find(study_area)
 # The following commands can download more data than intended:
 # network = osmextract::oe_get(study_area, boundary = study_area, boundary_type = "clipsrc")
-network = osmextract::oe_get_network(study_area, boundary = study_area, boundary_type = "clipsrc", mode = "driving")
+network = osmextract::oe_get_network(study_area, boundary = study_area, boundary_type = "clipsrc", mode = "driving") |>
+  sf::st_cast("LINESTRING")
+# Remove small disconnected components
+network_components = stplanr::rnet_group(network)
+largest_component_id = table(network_components) |>
+  sort(decreasing = TRUE) |>
+  names() |>
+  first()
+nrow(network)
+network = network |>
+  slice(which(network_components == largest_component_id))
+nrow(network)
 ```
 
 ```{r}
@@ -237,7 +248,7 @@ We can use 'All or Nothing' assignment to route the trips estimated by the SIM t
 # Create cppRouting graph
 library(cppRouting)
 library(sfnetworks)
-net_sfn = as_sfnetwork(network |> sf::st_cast("LINESTRING"), directed = FALSE) |> 
+net_sfn = as_sfnetwork(network, directed = FALSE) |> 
   activate("nodes") |> 
   mutate(ID = row_number())
 edges_for_cpp = net_sfn |> 
@@ -316,7 +327,7 @@ if (!"dodgr" %in% installed.packages()) {
 library(dodgr)
 # 1. Create dodgr graph
 # Note: weight_streetnet can be time consuming
-net_dodgr_full = weight_streetnet(network |> sf::st_cast("LINESTRING"), wt_profile = "motorcar")
+net_dodgr_full = weight_streetnet(network, wt_profile = "motorcar")
 table(net_dodgr_full$component)
 net_dodgr_comp = dodgr_components(net_dodgr_full)
 table(net_dodgr_comp$component)
@@ -343,7 +354,7 @@ od_for_dodgr = od_calculated |>
   filter(!is.na(from), !is.na(to))
 # 4. Perform All-or-Nothing assignment
 # With just 1 OD pair:
-graph_with_flows = dodgr_flows_aggregate(net_dodgr, from = od_for_dodgr$from, to = od_for_dodgr$to, flows = od_for_dodgr$flow)
+graph_with_flows = dodgr_flows_aggregate(net_dodgr, from = od_for_dodgr$from, to = od_for_dodgr$to, flows = od_for_dodgr$flow, pairwise = TRUE)
 # 5. Plot the results
 graph_with_flows_sf = dodgr_to_sf(graph_with_flows)
 graph_with_flows_sf |>
@@ -358,8 +369,6 @@ graph_with_flows_sf |>
 ```{r}
 #| label: fig-single-route
 #| fig-cap: "A single route for the first OD pair"
-
-# First, ensure sfrouting is loaded
 library(sfrouting)
 
 # Get the first OD pair
@@ -367,12 +376,20 @@ first_od = od_calculated_nodes[1, ]
 from_node = first_od$from_node_id
 to_node = first_od$to_node_id
 
+nodes_1_2 = net_sfn |> 
+  activate("nodes") |> 
+  filter(ID %in% c(from_node, to_node)) |> 
+  st_as_sf()
 # Calculate the route
 single_route = sr_route(net_sfn, from = from_node, to = to_node)
+# Currently returns no data. TODO: debug
+nrow(single_route)
 
 # Plot the route on top of the network
 ggplot() +
   geom_sf(data = st_as_sf(net_sfn, "edges"), color = "grey70") +
+  # Add nodes:
+  geom_sf(data = nodes_1_2, color = "red", size = 1) +
   geom_sf(data = single_route, color = "blue", size = 2) +
   labs(title = "Route for the first OD pair")
 ```
