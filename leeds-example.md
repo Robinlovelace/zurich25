@@ -169,3 +169,43 @@ We can use ‘All or Nothing’ assignment to route the trips estimated by
 the SIM through the network.
 
 We can do the same thing with the `dodgr` package.
+
+The following code uses dodgr for getting an undirected routable network
+from OSM, and then uses cppRouting for finding the shortest path between
+two random points (credit: Juan Fonseca)
+
+
+         1      2      3      4      5      6      7      8      9     10     11 
+    239222   1016    198    166    116     92     90     42     42     42     42 
+        12     13     14     15     16     17     18     19     20     21     22 
+        36     34     34     32     28     22     20     18     18     18     14 
+        23     24     25     26     27     28     29     30     31     32     33 
+        14     12     10     10     10     10     10     10     10      8      8 
+        34     35     36     37     38     39     40     41     42     43     44 
+         8      8      8      8      6      6      4      4      4      4      4 
+        45     46     47     48     49     50     51     52     53     54     55 
+         4      2      2      2      2      2      2      2      2      2      2 
+        56     57     58     59     60     61     62     63     64     65 
+         2      2      2      2      2      2      2      2      2      2 
+
+
+         1      2      3      4      5      6      7      8      9     10     11 
+    239222   1016    198    166    116     92     90     42     42     42     42 
+        12     13     14     15     16     17     18     19     20     21     22 
+        36     34     34     32     28     22     20     18     18     18     14 
+        23     24     25     26     27     28     29     30     31     32     33 
+        14     12     10     10     10     10     10     10     10      8      8 
+        34     35     36     37     38     39     40     41     42     43     44 
+         8      8      8      8      6      6      4      4      4      4      4 
+        45     46     47     48     49     50     51     52     53     54     55 
+         4      2      2      2      2      2      2      2      2      2      2 
+        56     57     58     59     60     61     62     63     64     65 
+         2      2      2      2      2      2      2      2      2      2 
+
+
+         1 
+    239222 
+
+![](leeds-example_files/figure-commonmark/unnamed-chunk-11-1.png)
+
+![](leeds-example_files/figure-commonmark/unnamed-chunk-11-2.png)

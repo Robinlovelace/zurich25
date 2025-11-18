@@ -323,6 +323,74 @@ rnet_go_dutch |>
 We can use 'All or Nothing' assignment to route the trips estimated by the SIM through the network.
 
 ```{r}
+#| label: fig-dodgr-aon
+#| fig-cap: "Estimated flows from All-or-Nothing assignment with dodgr"
+#| eval: false
+# Note: currently fails: https://github.com/UrbanAnalyst/dodgr/issues/325
+# The dodgr equivalent of the above is as follows:
+if (!"dodgr" %in% installed.packages()) {
+  install.packages("dodgr")
+}
+library(dodgr)
+# 1. Create dodgr graph
+# Note: weight_streetnet can be time consuming
+dodgr_sc = dodgr_streetnet_sc(st_bbox(study_area))
+net_dodgr_full = weight_streetnet(dodgr_sc, wt_profile = "motorcar")
+net_dodgr_comp = dodgr_components(net_dodgr_full)
+# Clean graph to only include largest connected component
+net_dodgr = net_dodgr_comp[net_dodgr_comp$component == 1, ]
+head(net_dodgr)
+
+net_dodgr_sf = dodgr_to_sf(net_dodgr)
+vert_dodgr = dodgr_vertices(net_dodgr)
+vert_dodgr_sf = vert_dodgr |>
+  st_as_sf(coords = c("x", "y"), crs = st_crs(4326))
+
+# 2. Map OD data to network nodes
+zone_centroids_dodgr = st_centroid(zones)
+# plot(zone_centroids_dodgr$geometry)
+# Find nearest vertices
+v_ids = dodgr::match_pts_to_verts(vert_dodgr, zone_centroids_dodgr)
+vert_dodgr_centroids = vert_dodgr |> 
+  slice(v_ids)
+vert_dodgr_centroids |> 
+  sf::st_as_sf(coords = c("x", "y")) |>
+  plot()
+vert_dodgr_centroids$label = zone_centroids_dodgr$label
+# join with od_calculated
+od_calculated_nodes = od_calculated |>
+  left_join(vert_dodgr_centroids |> select(label, id), join_by(O == label)) |>
+  rename(from_id = id) |>
+  left_join(vert_dodgr_centroids |> select(label, id), join_by(D == label)) |>
+  rename(to_id = id)
+
+# Single route between first two zones for testing:
+p = dodgr_paths(
+  graph = net_dodgr,
+  from = od_calculated_nodes$from_id[1],
+  to = od_calculated_nodes$to_id[1]
+)
+
+flows = dodgr::dodgr_flows_aggregate(
+  net_dodgr,
+  from = od_calculated_nodes$from_id,
+  to = od_calculated_nodes$to_id,
+  flows = od_calculated$interaction,
+  pairwise = TRUE,
+  norm_sums = FALSE
+)
+# To sf
+flows_sf = dodgr_to_sf(flows)
+flows_sf |> 
+  filter(flow > 0) |>
+  ggplot() +
+  geom_sf(aes(color = flow, lwd = flow))
+summary(flows$flow)
+summary(od_calculated$interaction)
+```
+
+
+```{r}
 #| label: fig-aon
 #| fig-cap: "Estimated flows from All-or-Nothing assignment"
 #| eval: false
@@ -330,46 +398,58 @@ We can use 'All or Nothing' assignment to route the trips estimated by the SIM t
 # Create cppRouting graph
 library(cppRouting)
 library(sfnetworks)
-net_sfn = as_sfnetwork(network, directed = FALSE) |> 
-  activate("nodes") |> 
-  mutate(ID = row_number())
-edges_for_cpp = net_sfn |> 
-  activate("edges") |> 
-  st_as_sf() |> 
-  mutate(weight = units::drop_units(st_length(geometry))) |> 
+
+df_for_cpp <- net_dodgr_sf |> 
   st_drop_geometry() |> 
-  select(from, to, weight)
-nodes_df = net_sfn |> 
-  activate("nodes") |> 
-  st_as_sf()
-nodes_for_cpp = data.frame(
-    ID = nodes_df$ID,
-    X = st_coordinates(nodes_df)[, 1],
-    Y = st_coordinates(nodes_df)[, 2]
-  )
-graph_cpp = cppRouting::makegraph(
-  df = edges_for_cpp,
-  directed = FALSE,
-  coords = nodes_for_cpp
+  select(from = from_id, to = to_id, dist = d_weighted)
+head(df_for_cpp)
+
+graph_cpp = makegraph(df_for_cpp, directed = FALSE)
+head(graph_cpp[[1]])
+str(graph_cpp)
+rand_origin = sample(net_dodgr_sf$from_id, 1)
+rand_destination = sample(net_dodgr_sf$to_id, 1)
+rand_route = get_path_pair(
+  Graph = graph_cpp,
+  from = rand_origin,
+  to = rand_destination
 )
 
-# Map OD data to network nodes
-zone_centroids = st_centroid(zones)
-net_nodes_sf = net_sfn |> activate("nodes") |> st_as_sf()
-nearest_node_indices = st_nearest_feature(zone_centroids, net_nodes_sf)
-zone_centroids$node_id = net_nodes_sf$ID[nearest_node_indices]
+rand_route_edges <- tibble(from_id = c(rand_route[[1]],NA),
 
+
+to_id = c(NA,rand_route[[1]])) |> drop_na() 
+
+rand_route_sf <- bind_rows(
+  net_dodgr_sf |> 
+  semi_join(rand_route_edges, by = c("from_id", "to_id")),
+net_dodgr_sf |> 
+  semi_join(rand_route_edges, by = c("from_id"="to_id", "to_id"="from_id"))) # this is done as the network is undirected
+
+tm_shape(net_dodgr_sf)+
+  tm_lines("grey",lwd = 0.8)+
+  tm_shape(rand_route_sf)+
+  tm_lines("steelblue", lwd = 2)
+
+# Using od data mapped to network nodes from earlier, check the ids are in the graph
+all(od_calculated_nodes$from_id %in% net_dodgr_sf$from_id)
 od_calculated_nodes = od_calculated |>
-  left_join(zone_centroids |> st_drop_geometry() |> select(label, node_id), by = c("O" = "label")) |>
-  rename(from_node_id = node_id) |>
-  left_join(zone_centroids |> st_drop_geometry() |> select(label, node_id), by = c("D" = "label")) |>
-  rename(to_node_id = node_id)
+  left_join(vert_dodgr_centroids |> select(label, n), join_by(O == label)) |>
+  rename(from_id = n) |>
+  left_join(vert_dodgr_centroids |> select(label, n), join_by(D == label)) |>
+  rename(to_id = n) |>
+  # to character: 
+  mutate(
+    from_id = as.character(from_id),
+    to_id = as.character(to_id)
+  )
+
 
 # Perform All-or-Nothing assignment
 aon_flows = cppRouting::get_aon(
   Graph = graph_cpp,
-  from = od_calculated_nodes$from_node_id,
-  to = od_calculated_nodes$to_node_id,
+  from = od_calculated_nodes$from_id,
+  to = od_calculated_nodes$to_id,
   demand = od_calculated_nodes$interaction
 )
 
@@ -395,57 +475,30 @@ sfn_edges_with_flow |>
   labs(title = "Estimated flows from All-or-Nothing assignment")
 ```
 
-We can do the same thing with the `dodgr` package.
-
 ```{r}
-#| label: fig-dodgr-aon
-#| fig-cap: "Estimated flows from All-or-Nothing assignment with dodgr"
 #| eval: false
-# Note: currently fails: https://github.com/UrbanAnalyst/dodgr/issues/325
-# The dodgr equivalent of the above is as follows:
-if (!"dodgr" %in% installed.packages()) {
-  install.packages("dodgr")
-}
-library(dodgr)
-# 1. Create dodgr graph
-# Note: weight_streetnet can be time consuming
-net_dodgr_full = weight_streetnet(network, wt_profile = "motorcar")
-table(net_dodgr_full$component)
-net_dodgr_comp = dodgr_components(net_dodgr_full)
-table(net_dodgr_comp$component)
-# Clean graph to only include largest connected component
-net_dodgr = net_dodgr_comp[net_dodgr_comp$component == 1, ]
-table(net_dodgr$component)
-# 2. Map OD data to network nodes
-verts = dodgr_vertices(net_dodgr)
-zone_centroids_dodgr = st_centroid(zones)
-# Find nearest vertices
-from_pts = dodgr::match_pts_to_graph(net_dodgr, zone_centroids_dodgr, connected = TRUE)
-# 3. Prepare OD data
-zone_to_vertex_map = data.frame(
-  label = zone_centroids_dodgr$label,
-  vertex_id = from_pts
+#| label: fig-dodgr-random-route
+rand_route = get_path_pair(
+  Graph = graph_cpp,
+  from = rand_origin,
+  to = rand_destination
 )
-od_for_dodgr = od_calculated |>
-  left_join(zone_to_vertex_map, by = c("O" = "label")) |>
-  rename(from_id = vertex_id) |>
-  left_join(zone_to_vertex_map, by = c("D" = "label")) |>
-  rename(to_id = vertex_id) |>
-  select(from_id, to_id, interaction) |>
-  rename(from = from_id, to = to_id, flow = interaction) |> 
-  filter(!is.na(from), !is.na(to))
-# 4. Perform All-or-Nothing assignment
-# With just 1 OD pair:
-graph_with_flows = dodgr_flows_aggregate(net_dodgr, from = od_for_dodgr$from, to = od_for_dodgr$to, flows = od_for_dodgr$flow, pairwise = TRUE)
-# 5. Plot the results
-graph_with_flows_sf = dodgr_to_sf(graph_with_flows)
-graph_with_flows_sf |>
-  filter(flow > 0) |>
-  ggplot() +
-  geom_sf(aes(color = flow, lwd = flow)) +
-  scale_color_viridis_c(trans = "log10") +
-  scale_linewidth_continuous(range = c(0.1, 3)) +
-  labs(title = "Estimated flows from All-or-Nothing assignment (dodgr)")
+
+rand_route_edges <- tibble(from_id = c(rand_route[[1]],NA),
+to_id = c(NA,rand_route[[1]])) |> drop_na() 
+
+rand_route_sf <- bind_rows(
+  net_dodgr_sf |> 
+  semi_join(rand_route_edges, by = c("from_id", "to_id")),
+net_dodgr_sf |> 
+  semi_join(rand_route_edges, by = c("from_id"="to_id", "to_id"="from_id"))) # this is done as the network is undirected
+
+tm_shape(net_dodgr_sf)+
+  tm_lines("grey",lwd = 0.8)+
+  tm_shape(od_rand)+
+  tm_dots(col = "red", size = 0.2) +
+  tm_shape(rand_route_sf) +
+  tm_lines("steelblue", lwd = 2)
 ```
 
 ```{r}
@@ -478,14 +531,13 @@ ggplot() +
 ```
 
 
-The following code uses dodgr for getting an undirected routable network from OSM, and then uses cppRouting for finding the shortest path between two  random points.
+The following code uses dodgr for getting an undirected routable network from OSM, and then uses cppRouting for finding the shortest path between two  random points (credit: Juan Fonseca)
 
 
 ```{r}
 library(tmap)
 library(cppRouting)
 library(dodgr)
-
 
 dodgr_sc <- dodgr_streetnet_sc(st_bbox(study_area))
 
@@ -500,9 +552,9 @@ net_dodgr = net_dodgr_comp[net_dodgr_comp$component == 1, ]
 table(net_dodgr$component)
 
 net_dodgr_sf = dodgr_to_sf(net_dodgr)
-
-vert_dodgr_sf <- dodgr_vertices(net_dodgr) |> st_as_sf(coords = c("x", "y"), crs = st_crs(4326))
-
+plot(net_dodgr_sf$geometry)
+vert_dodgr_sf <- dodgr_vertices(net_dodgr) |>
+  st_as_sf(coords = c("x", "y"), crs = st_crs(4326))
 
 set.seed(123)
 rand_origin = sample(net_dodgr_sf$from_id, 1)
@@ -542,8 +594,8 @@ net_dodgr_sf |>
 tm_shape(net_dodgr_sf)+
   tm_lines("grey",lwd = 0.8)+
   tm_shape(od_rand)+
-  tm_dots(col = "red", size = 0.2)
-  tm_shape(rand_route_sf)+
+  tm_dots(col = "red", size = 0.2) +
+  tm_shape(rand_route_sf) +
   tm_lines("steelblue", lwd = 2)
 
 ```
