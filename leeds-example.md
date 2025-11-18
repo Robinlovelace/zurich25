@@ -180,4 +180,12 @@ two random points (credit: Juan Fonseca)
 Using the same graph, we can perform All-or-Nothing assignment as
 follows:
 
-![](leeds-example_files/figure-commonmark/unnamed-chunk-12-1.png)
+### Visualization of the flows from AoN assignment
+
+<div id="fig-aon-flows">
+
+![](leeds-example_files/figure-commonmark/fig-aon-flows-1.png)
+
+Figure 4: Estimated flows from All-or-Nothing assignment and cppRouting
+
+</div>

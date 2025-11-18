@@ -614,7 +614,7 @@ zone_centroids$node <- net_dodgr_sf$from_id[st_nearest_feature(
   net_dodgr_sf
 )]
 
-#
+
 
 od_cpp <- od_calculated |>
   st_drop_geometry() |>
@@ -662,18 +662,33 @@ flows_sf <- bind_rows(
   summarise(flow = sum(flow), .by = edge_id)
 
 
-# Visualization of the flows from AoN assignment
+```
+
+
+
+### Visualization of the flows from AoN assignment
+
+```{r}
+#| label: fig-aon-flows
+#| fig-cap: "Estimated flows from All-or-Nothing assignment and cppRouting"
+#| fig-dpi: 300
+#| fig-width: 6
+#| fig-height: 6
+
 net_dodgr_sf |>
-  inner_join(flows_sf, by = "edge_id") |>
+  inner_join(flows_sf,
+   by = "edge_id") |>
+    arrange(-flow) |> 
   tm_shape() +
-  tm_lines(
-    "flow",
-    lwd = "flow",
-    scale = 9,
-    palette = "-Reds",
-    title.lwd = "Flow"
-  ) +
-  tm_layout(title = "All-or-Nothing assignment with cppRouting")
+tm_lines("flow",col.scale = tm_scale_intervals(
+  n = 5,
+  style = "fisher",
+  values = "brewer.reds"),
+  lwd = "flow",
+   lwd.scale = tm_scale_continuous(values.range = c(0.01,0.8),
+   values.scale = 9),
+   lwd.legend = tm_legend_combine("col"))
+  
 
 ```
 
