@@ -315,7 +315,7 @@ tm_shape(rnet_go_dutch) +
 #| fig-cap: "Go Dutch scenario"
 rnet_go_dutch |> 
   ggplot() +
-  geom_sf(aes(lwd = bicycle_go_dutch_sum)) +
+  geom_sf(aes(lwd = go_dutch)) +
   scale_linewidth_continuous(range = c(0.1, 3)) +
   labs(title = "Go Dutch scenario")
 ```
